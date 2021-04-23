@@ -23,6 +23,7 @@ export interface ICompilerOptions {
   ignoreGenerics?: boolean;
   ignoreIndexSignature?: boolean;
   inlineImports?: boolean;
+  whitelistedNames?: string[];
 }
 
 // The main public interface is `Compiler.compile`.
@@ -183,7 +184,6 @@ export class Compiler {
     const name = this.getName(node.name);
     const members: string[] = node.members.map(m =>
       `  "${this.getName(m.name)}": ${getTextOfConstantValue(this.checker.getConstantValue(m))},\n`);
-    this.exportedNames.push(name);
     return this._formatExport(name, `t.enumtype({\n${members.join("")}})`);
   }
   private _compileInterfaceDeclaration(node: ts.InterfaceDeclaration): string {
@@ -198,12 +198,10 @@ export class Compiler {
         extend.push(...h.types.map(this.compileNode, this));
       }
     }
-    this.exportedNames.push(name);
     return this._formatExport(name, `t.iface([${extend.join(", ")}], {\n${members.join("")}})`)
   }
   private _compileTypeAliasDeclaration(node: ts.TypeAliasDeclaration): string {
     const name = this.getName(node.name);
-    this.exportedNames.push(name);
     const compiled = this.compileNode(node.type);
     // Turn string literals into explicit `name` nodes, as expected by ITypeSuite.
     const fullType = compiled.startsWith('"') ? `t.name(${compiled})` : compiled;
@@ -263,9 +261,12 @@ export class Compiler {
     return `[t.indexKey]: ${type}`;
   }
   private _formatExport(name: string, expression: string): string {
+    if (!this.options.whitelistedNames || this.options.whitelistedNames.includes(name)) {
+      this.exportedNames.push(name);
+    }
     return this.options.format === "js:cjs"
         ? `  ${name}: ${this.indent(expression)},`
-        : `export const ${name} = ${expression};`;
+        : `const ${name} = ${expression};`;
   }
 }
 
@@ -310,6 +311,7 @@ export function main() {
   .option("-o, --outDir <path>", `Directory for output files; same as source file if omitted`)
   .option("-v, --verbose", "Produce verbose output")
   .option("-c, --changed-only", "Skip the build if the output file exists with a newer timestamp")
+  .option("--whitelisted-names <names>", "Whitelisted interface names")
   .parse(process.argv);
 
   const files: string[] = commander.args;
@@ -322,6 +324,7 @@ export function main() {
     ignoreGenerics: commander.ignoreGenerics,
     ignoreIndexSignature: commander.ignoreIndexSignature,
     inlineImports: commander.inlineImports,
+    whitelistedNames: commander.whitelistedNames,
   };
 
   if (files.length === 0) {
